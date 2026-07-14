@@ -236,6 +236,7 @@ select.fi{appearance:none;cursor:pointer;background-image:url("data:image/svg+xm
 .order-main-action{background:var(--blue)!important;color:#fff!important;border:0!important;}
 .order-pay{background:var(--successL)!important;color:var(--success)!important;border:1px solid var(--success)!important;}
 #ord-list button[onclick^="wppOrdem"]{display:none!important;}
+#ord-list .order-close{display:none!important;}
 #ord-list .order-card .fgap button[onclick^="excluirOrdem"]{display:none!important;}
 .fin-delete-x{margin-left:auto;width:28px;height:28px;padding:0;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--text2);font-size:1.25rem;line-height:24px;cursor:pointer;}
 .fin-delete-x:hover{background:var(--dangerL);color:var(--danger);border-color:var(--danger);}
@@ -358,7 +359,8 @@ select.fi{appearance:none;cursor:pointer;background-image:url("data:image/svg+xm
 .err-box{background:var(--dangerL);border:1px solid #d4a0a0;border-radius:8px;padding:10px 13px;font-size:.78rem;color:var(--danger);margin-bottom:12px;display:none;}
 .ag-semana{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:.68rem;color:var(--text3);font-weight:700;margin-bottom:4px;}
 .ag-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
-.ag-cel{aspect-ratio:1;border-radius:8px;background:var(--card,#f7f8fa);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:.72rem;}
+.ag-cel{aspect-ratio:1;border-radius:14px;background:var(--card,#f7f8fa);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:.72rem;transition:transform .15s,background .15s;box-shadow:0 1px 4px rgba(20,40,35,.06);}
+.ag-cel:hover{transform:translateY(-2px);background:var(--blueL);}
 .ag-cel.ag-vazio{background:none;cursor:default;}
 .ag-cel.ag-hoje{background:var(--blue);color:#fff;font-weight:700;}
 .ag-num{font-weight:600;}
@@ -932,7 +934,7 @@ function statusBadge(s) {
       <div class="field"><label>Horário</label><input type="time" class="fi" id="no-hora"></div>
       <div class="field"><label>Descrição</label><textarea class="fi" rows="2" id="no-desc"></textarea></div>
       <div class="field"><label>Valor estimado (R$)</label><input type="number" class="fi" id="no-valor" placeholder="0.00"></div>
-      <button class="btn btn-blue btn-w" id="no-btn" onclick="salvarOrdem()">Criar Ordem</button>
+      <input type="hidden" id="no-edit-id"><button class="btn btn-blue btn-w" id="no-btn" onclick="salvarOrdem()">Criar Ordem</button>
     </div>
   </div>
 </div>
@@ -1075,6 +1077,7 @@ function selUrg(el,v){document.querySelectorAll('.urg .ub').forEach(b=>b.classNa
 // ===== MODAL =====
 function abrirModal(id) {
   document.getElementById(id).classList.add('open');
+  if(id==='m-ordem' && document.getElementById('ord-edit-delete') && !document.getElementById('no-edit-id').value) document.getElementById('ord-edit-delete').style.display='none';
   if (id==='m-ordem'||id==='m-equip'||id==='m-lembrete') populateClientSelect();
 }
 function fecharModal(id){document.getElementById(id).classList.remove('open');}
@@ -1373,6 +1376,34 @@ function abrirDetalheEquip(id) {
     <div style="display:flex;gap:8px;"><button class="btn btn-blue" style="flex:1;padding:12px;" onclick="fecharModal('m-cli-detalhe');editarEquipamento('${e.id}')">Editar</button><button class="btn" style="flex:1;padding:12px;background:var(--dangerL);color:var(--danger);border:1px solid var(--danger);border-radius:10px;font-weight:700;font-size:.85rem;cursor:pointer;" onclick="fecharModal('m-cli-detalhe');excluirEquipamento('${e.id}')">Excluir</button></div>`;
   abrirModal('m-cli-detalhe');
 }
+
+// Edição de ordem usando o mesmo formulário visual de Nova Ordem.
+function abrirEdicaoOrdem(id){
+  const o=state.orders.find(x=>x.id===id); if(!o) return;
+  populateClientSelect();
+  document.getElementById('no-edit-id').value=o.id;
+  document.getElementById('no-cliente').value=o.client_id||'';
+  document.getElementById('no-tipo').value=o.service_type||'';
+  document.getElementById('no-status').value=o.status||'Aberta';
+  document.getElementById('no-data').value=o.scheduled_date||'';
+  document.getElementById('no-hora').value=o.scheduled_time||'';
+  document.getElementById('no-desc').value=o.description||'';
+  document.getElementById('no-valor').value=o.estimated_value??'';
+  const titulo=document.getElementById('no-titulo') || document.querySelector('#m-ordem .mbox-title'); if(titulo) titulo.firstChild.textContent='Editar Ordem de Serviço ';
+  document.getElementById('no-btn').textContent='Salvar alterações';
+  document.getElementById('no-btn').onclick=salvarEdicaoOrdem;
+  let excluirBtn=document.getElementById('ord-edit-delete');
+  if(!excluirBtn){ excluirBtn=document.createElement('button'); excluirBtn.id='ord-edit-delete'; excluirBtn.className='btn'; excluirBtn.style.cssText='width:100%;margin-top:8px;padding:11px;background:var(--dangerL);color:var(--danger);border:1px solid var(--danger);border-radius:10px;font-weight:700;cursor:pointer;'; document.getElementById('no-btn').parentNode.appendChild(excluirBtn); }
+  excluirBtn.textContent='Excluir ordem'; excluirBtn.style.display='block'; excluirBtn.onclick=()=>{ fecharModal('m-ordem'); excluirOrdem(id); };
+  abrirModal('m-ordem');
+}
+async function salvarEdicaoOrdem(){
+  const id=document.getElementById('no-edit-id').value, o=state.orders.find(x=>x.id===id); if(!o) return;
+  const dados={service_type:document.getElementById('no-tipo').value,status:document.getElementById('no-status').value,scheduled_date:document.getElementById('no-data').value||undefined,scheduled_time:document.getElementById('no-hora').value||undefined,description:document.getElementById('no-desc').value,estimated_value:document.getElementById('no-valor').value===''?undefined:Number(document.getElementById('no-valor').value)};
+  try{const atualizado=await apiPut('ServiceOrder',id,dados);Object.assign(o,atualizado);document.getElementById('no-edit-id').value='';document.getElementById('no-btn').textContent='Criar Ordem';document.getElementById('no-btn').onclick=salvarOrdem;fecharModal('m-ordem');renderOrdens(state.orders);toast('Ordem atualizada');}
+  catch(e){toast('Não foi possível salvar a ordem');}
+}
+editarOrdemDetalhe = function(id){ abrirEdicaoOrdem(id); };
 
 // ===== LOAD ORDERS =====
 async function loadOrdens() {
