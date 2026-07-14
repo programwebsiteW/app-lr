@@ -1345,6 +1345,32 @@ async function excluirEquipamento(id) {
 }
 function filtEq(v){document.querySelectorAll('#eq-list .ec').forEach(r=>{r.style.display=r.dataset.search.toLowerCase().includes(v.toLowerCase())?'flex':'none';});}
 
+// Equipamentos usam o mesmo padrão compacto e clicável da lista de Clientes.
+function renderEquipamentosComoClientes(list) {
+  document.getElementById('eq-count').textContent = list.length + ' equipamento(s) cadastrado(s)';
+  document.getElementById('eq-list').innerHTML = list.length ? list.map(e=>`
+    <div class="crow" data-nome="${e.model||''} ${e.client_name||''}" onclick="abrirDetalheEquip('${e.id}')" style="cursor:pointer;">
+      <div class="cav">${(e.model||'E').trim().slice(0,2).toUpperCase()}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:.88rem;font-weight:600;color:var(--text);">${e.model}${e.brand?' — '+e.brand:''}</div>
+        <div style="font-size:.73rem;color:var(--text2);margin-top:1px;">${e.type||'Equipamento'} · ${formatName(e.client_name)}</div>
+      </div>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>`).join('') : '<div class="empty">Nenhum equipamento cadastrado</div>';
+}
+renderEquip = renderEquipamentosComoClientes;
+filtEq = function(v){document.querySelectorAll('#eq-list .crow').forEach(r=>{r.style.display=(r.dataset.nome||'').toLowerCase().includes(v.toLowerCase())?'flex':'none';});};
+function abrirDetalheEquip(id) {
+  const e = state.equipment.find(x=>x.id===id); if(!e) return;
+  document.getElementById('det-cli-titulo').textContent = e.model || 'Equipamento';
+  document.getElementById('det-cli-body').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:18px;">
+      ${[['CLIENTE',formatName(e.client_name)],['TIPO',e.type||'—'],['MARCA',e.brand||'—'],['BTU',e.btu||'—'],['INSTALAÇÃO',e.installation_date?fmtDate(e.installation_date):'—'],['NÚMERO DE SÉRIE',e.serial_number||'—']].map(([l,v])=>`<div><div style="font-size:.65rem;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px;">${l}</div><div style="font-size:.88rem;color:var(--text);word-break:break-word;">${v}</div></div>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px;"><button class="btn btn-blue" style="flex:1;padding:12px;" onclick="fecharModal('m-cli-detalhe');editarEquipamento('${e.id}')">Editar</button><button class="btn" style="flex:1;padding:12px;background:var(--dangerL);color:var(--danger);border:1px solid var(--danger);border-radius:10px;font-weight:700;font-size:.85rem;cursor:pointer;" onclick="fecharModal('m-cli-detalhe');excluirEquipamento('${e.id}')">Excluir</button></div>`;
+  abrirModal('m-cli-detalhe');
+}
+
 // ===== LOAD ORDERS =====
 async function loadOrdens() {
   if (state.loaded.orders) { renderOrdens(state.orders); renderPedidosNovos(); return; }
