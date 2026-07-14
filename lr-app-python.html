@@ -238,6 +238,8 @@ select.fi{appearance:none;cursor:pointer;background-image:url("data:image/svg+xm
 #ord-list .order-card .fgap button[onclick^="excluirOrdem"]{display:none!important;}
 .fin-delete-x{margin-left:auto;width:28px;height:28px;padding:0;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--text2);font-size:1.25rem;line-height:24px;cursor:pointer;}
 .fin-delete-x:hover{background:var(--dangerL);color:var(--danger);border-color:var(--danger);}
+.eq-next{margin-left:auto;border:0;background:transparent;color:var(--text2);font-size:1.5rem;line-height:1;padding:2px 6px;cursor:pointer;}
+.eq-next:hover{color:var(--blue);}
 #fin-list .fin-tools button[onclick^="excluirOrdem"]{display:none!important;}
 #ord-list .order-card .fgap .btn-sm-g{background:var(--blue)!important;color:#fff!important;border:0!important;border-radius:9px;}
 #ord-list .order-card .fgap .btn-sm-o{background:var(--successL)!important;color:var(--success)!important;border:1px solid var(--success)!important;border-radius:9px;}
@@ -1073,7 +1075,7 @@ function abrirModal(id) {
   if (id==='m-ordem'||id==='m-equip'||id==='m-lembrete') populateClientSelect();
 }
 function fecharModal(id){document.getElementById(id).classList.remove('open');}
-document.addEventListener('dblclick', e => {
+document.addEventListener('click', e => {
   const modal = e.target.closest('.mov.open');
   if (modal && e.target === modal) fecharModal(modal.id);
 });
@@ -1321,9 +1323,25 @@ function renderEquip(list) {
         <div class="card-s">${e.type}${e.btu?' · '+e.btu+' BTU':''} · ${formatName(e.client_name)}</div>
         ${e.installation_date?`<div class="card-s">Inst: ${fmtDate(e.installation_date)}</div>`:''}
         ${e.last_maintenance_date?`<div class="card-s">Última manut: ${fmtDate(e.last_maintenance_date)}</div>`:''}
-        <div class="fgap"><button class="btn btn-sm btn-sm-o" onclick="criarLembreteRapido('${e.client_name}','${e.id}','${e.model}')">Criar lembrete</button></div>
+        <div class="fgap"><button class="btn btn-sm btn-sm-o" onclick="criarLembreteRapido('${e.client_name}','${e.id}','${e.model}')">Criar lembrete</button><button class="btn btn-sm btn-sm-k" onclick="editarEquipamento('${e.id}')">Editar</button><button class="eq-next" aria-label="Mais opções" onclick="editarEquipamento('${e.id}')">&gt;</button></div>
       </div>
     </div>`).join('') : '<div class="empty">Nenhum equipamento cadastrado</div>';
+}
+async function editarEquipamento(id) {
+  const e = state.equipment.find(x => x.id === id); if (!e) return;
+  const modelo = prompt('Modelo do equipamento:', e.model || ''); if (modelo === null) return;
+  const marca = prompt('Marca:', e.brand || ''); if (marca === null) return;
+  try {
+    await apiPut('Equipment', id, {model:modelo.trim(), brand:marca.trim()});
+    Object.assign(e, {model:modelo.trim(), brand:marca.trim()});
+    renderEquip(state.equipment); toast('Equipamento atualizado');
+  } catch(err) { toast('Não foi possível editar o equipamento'); }
+}
+async function excluirEquipamento(id) {
+  const e = state.equipment.find(x => x.id === id); if (!e) return;
+  if (!confirm(`Excluir o equipamento "${e.model}"?`)) return;
+  try { await apiDelete('Equipment', id); state.equipment = state.equipment.filter(x => x.id !== id); renderEquip(state.equipment); toast('Equipamento excluído'); }
+  catch(err) { toast('Não foi possível excluir o equipamento'); }
 }
 function filtEq(v){document.querySelectorAll('#eq-list .ec').forEach(r=>{r.style.display=r.dataset.search.toLowerCase().includes(v.toLowerCase())?'flex':'none';});}
 
