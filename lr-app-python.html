@@ -1802,6 +1802,7 @@ function renderAgendaDia(data) {
     html += `<div class="card card-orange"><div class="row"><span class="card-t">⏰ ${formatName(r.client_name)} · ${r.maintenance_type}</span>${statusBadge(r.status||'Pendente')}</div></div>`;
   });
   document.getElementById('ag-dia-lista').innerHTML = html || '<div class="empty">Nada marcado nesse dia</div>';
+  document.getElementById('contador-lembretes').innerText = ev.lembretes.length;
 }
 
 // ===== ACTIONS =====
