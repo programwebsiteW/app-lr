@@ -481,6 +481,12 @@ async function apiAuth(usuario, senha) {
   const r = await fetch(`${API_BASE}/auth`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({usuario, senha})});
   return r.ok;
 }
+async function apiSession() {
+  const r = await fetch(`${API_BASE}/session`);
+  if (!r.ok) return false;
+  const data = await r.json();
+  return Boolean(data.authenticated);
+}
 async function apiConfigSalvar(data) {
   const r = await fetch(`${API_BASE}/config`, {
     method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
@@ -874,6 +880,7 @@ function statusBadge(s) {
       <div id="ag-cal-head" style="display:flex;align-items:center;justify-content:space-between;margin:10px 0;">
         <button class="btn btn-sm btn-sm-k" onclick="agMudarMes(-1)">‹</button>
         <div id="ag-mes-label" style="font-weight:700;font-size:.95rem;"></div>
+        <button class="btn btn-sm btn-sm-k" type="button" onclick="agIrHoje()">Hoje</button>
         <button class="btn btn-sm btn-sm-k" onclick="agMudarMes(1)">›</button>
       </div>
       <div id="ag-cal"><div class="loading"><div class="spinner"></div></div></div>
@@ -1091,10 +1098,10 @@ async function loginTech() {
     err.style.display = 'block';
   }
 }
-function restoreSession(){
+async function restoreSession(){
   try {
     const s=JSON.parse(localStorage.getItem('lr_session')||'null');
-    if(s && s.at && Date.now()-s.at < 1000*60*60*24*14){ go('app-tech'); setDashDate(); loadDashboard(); }
+    if(s && s.at && Date.now()-s.at < 1000*60*60*24*14 && await apiSession()){ go('app-tech'); setDashDate(); loadDashboard(); }
     else localStorage.removeItem('lr_session');
   } catch(e){ localStorage.removeItem('lr_session'); }
 }
@@ -1808,6 +1815,12 @@ function agMudarMes(delta) {
   agData = new Date(agData.getFullYear(), agData.getMonth()+delta, 1);
   renderAgendaCalendario();
 }
+function agIrHoje() {
+  const hoje = new Date();
+  agData = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  renderAgendaCalendario();
+  renderAgendaDia(hoje);
+}
 function agEventosDoDia(dataStr) {
   const ordens = state.orders.filter(o => o.scheduled_date === dataStr);
   const pagamentos = state.orders.filter(o => o.scheduled_date === dataStr && o.estimated_value && !o.paid);
@@ -1821,7 +1834,8 @@ function renderAgendaCalendario() {
   const primeiroDia = new Date(ano, mes, 1);
   const diasNoMes = new Date(ano, mes+1, 0).getDate();
   const offset = primeiroDia.getDay();
-  const hojeStr = new Date().toISOString().slice(0,10);
+  const hoje = new Date();
+  const hojeStr = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}-${String(hoje.getDate()).padStart(2,'0')}`;
 
   let celulas = '';
   for (let i=0;i<offset;i++) celulas += '<div class="ag-cel ag-vazio"></div>';
@@ -1841,8 +1855,10 @@ function renderAgendaCalendario() {
     <div class="ag-grid">${celulas}</div>`;
 }
 function renderAgendaDia(data) {
-  const dataStr = data.toISOString().slice(0,10);
-  const ehHoje = dataStr === new Date().toISOString().slice(0,10);
+  const dataStr = `${data.getFullYear()}-${String(data.getMonth()+1).padStart(2,'0')}-${String(data.getDate()).padStart(2,'0')}`;
+  const hoje = new Date();
+  const hojeStr = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}-${String(hoje.getDate()).padStart(2,'0')}`;
+  const ehHoje = dataStr === hojeStr;
   document.getElementById('ag-dia-titulo').textContent = ehHoje ? 'Hoje · ' + fmtDate(dataStr) : fmtDate(dataStr);
   const ev = agEventosDoDia(dataStr);
   let html = '';
@@ -2180,13 +2196,11 @@ async function buscaPedido() {
   document.getElementById('aco-result').style.display = 'none';
   document.getElementById('aco-vazio').style.display = 'none';
   try {
-    const parts = v.toLowerCase().split(' ').filter(Boolean);
-    const all = await apiGet('ServiceRequest', {limit:200});
-    const match = all.filter(r => {
-      const n = (r.name||'').toLowerCase();
-      const p = (r.phone||'').replace(/\D/g,'');
-      return parts.some(pt => n.split(' ').some(w=>w.startsWith(pt))) || p.includes(v.replace(/\D/g,''));
-    });
+    const url = new URL(`${API_BASE}/public/solicitacoes`, window.location.origin);
+    url.searchParams.set('q', v);
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Não foi possível buscar o pedido');
+    const match = await response.json();
     document.getElementById('aco-loading').style.display = 'none';
     if (match.length) {
       document.getElementById('aco-result').style.display = 'block';
@@ -2343,6 +2357,9 @@ sbMap['t-limpezas']='sb-limpezas';
   document.addEventListener('click',e=>{const card=e.target.closest('#t-dash #dash-stats .sc');if(!card)return;const t=card.textContent||'';if(t.includes('Clientes'))tp('t-clientes');else if(t.includes('Lembretes'))tp('t-lembretes');else if(t.includes('Atraso')){tp('t-ordens');setTimeout(()=>filtroCorreto('Em Atraso'),50);}else if(t.includes('Receita'))tp('t-relatorio');});
   limparDuplicados();
 })();
+
+// Avisos visuais: ajudam a perceber ordens incompletas sem alterar nenhum dado.
+const renderOrdensAvisosBase=renderOrdens; renderOrdens=function(list){renderOrdensAvisosBase(list);document.querySelectorAll('#ord-list .order-card').forEach(card=>{const o=(state.orders||[]).find(x=>x.id===card.dataset.orderId);if(!o)return;const area=card.querySelector('.fgap');if(!area)return;if((o.estimated_value===null||o.estimated_value===undefined||o.estimated_value==='')&&!card.querySelector('.aviso-sem-valor')){const aviso=document.createElement('div');aviso.className='card-s aviso-sem-valor';aviso.textContent='Valor ainda não informado';aviso.style.cssText='color:var(--text3);font-size:.72rem;width:100%;';area.before(aviso);}if(statusAtual(o)==='Agendada'&&!o.scheduled_date&&!card.querySelector('.aviso-sem-data')){const aviso=document.createElement('div');aviso.className='card-s aviso-sem-data';aviso.textContent='Falta definir data e horário';aviso.style.cssText='color:var(--danger);font-size:.72rem;width:100%;';area.before(aviso);}});};
 
 // init date
 // Atualização por gesto no celular: puxe a tela para baixo no topo da página.

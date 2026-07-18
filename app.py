@@ -15,9 +15,16 @@ Novidades:
 - Banco persistente: os dados não somem mais quando o Render reinicia ou publica.
 """
 import os, json, uuid, datetime, logging, sys, time
-from flask import Flask, request, jsonify, g, send_from_directory
+from functools import wraps
+from flask import Flask, request, jsonify, g, send_from_directory, session
 
 app = Flask(__name__)
+app.config.update(
+    SECRET_KEY=os.environ.get("SECRET_KEY") or uuid.uuid4().hex,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower() == "true",
+)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 USANDO_POSTGRES = bool(DATABASE_URL)
@@ -72,15 +79,21 @@ def unhandled_error(exc):
     logger.exception('request.failed', extra={'action':'request.failed','fields':{'errorType':type(exc).__name__}})
     return jsonify({'erro':'erro interno','requestId':g.request_id}), 500
 
-@app.after_request
-def add_cors(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, api_key"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    return response
-
 DB = "dados.db"
 DIAS_NA_LIXEIRA = 7
+ENTIDADES_PERMITIDAS = {"Client", "ServiceOrder", "Reminder", "Equipment", "ServiceRequest"}
+
+def entidade_valida(entidade):
+    if entidade not in ENTIDADES_PERMITIDAS:
+        return jsonify({"erro": "entidade invalida"}), 404
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("authenticated"):
+            return jsonify({"erro": "nao autorizado", "requestId": g.request_id}), 401
+        return view(*args, **kwargs)
+    return wrapped
 
 @app.route('/')
 def home():
@@ -157,7 +170,10 @@ def row_to_obj(row):
     return obj
 
 @app.route("/api/entities/<entidade>", methods=["GET"])
+@login_required
 def listar(entidade):
+    invalid = entidade_valida(entidade)
+    if invalid: return invalid
     conn = get_db()
     cur = conn.cursor()
     sort_by = request.args.get("sort_by", "-criado_em")
@@ -176,6 +192,21 @@ def listar(entidade):
 @app.route("/api/entities/<entidade>", methods=["POST"])
 def criar(entidade):
     dados = request.get_json(force=True) or {}
+    invalid = entidade_valida(entidade)
+    if invalid: return invalid
+    # A unica escrita publica e uma solicitacao feita pelo cliente no site.
+    if entidade != "ServiceRequest" and not session.get("authenticated"):
+        return jsonify({"erro": "nao autorizado", "requestId": g.request_id}), 401
+    if entidade == "ServiceRequest" and not session.get("authenticated"):
+        dados = {
+            "name": str(dados.get("name", "")).strip()[:120],
+            "phone": str(dados.get("phone", "")).strip()[:30],
+            "service_type": str(dados.get("service_type", "")).strip()[:80],
+            "description": str(dados.get("description", "")).strip()[:1000],
+            "status": "Novo",
+        }
+        if not dados["name"] or not dados["phone"] or not dados["service_type"]:
+            return jsonify({"erro": "dados da solicitacao incompletos"}), 400
     novo_id = str(uuid.uuid4())
     agora = datetime.datetime.utcnow().isoformat()
 
@@ -193,9 +224,37 @@ def criar(entidade):
     dados["created_date"] = agora
     return jsonify(dados), 201
 
+@app.route("/api/public/solicitacoes", methods=["GET"])
+def acompanhar_solicitacoes():
+    termo = (request.args.get("q") or "").strip().lower()
+    if len(termo) < 3:
+        return jsonify([])
+    numeros = "".join(char for char in termo if char.isdigit())
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(q("SELECT * FROM registros WHERE entidade=? AND excluido_em IS NULL ORDER BY criado_em DESC LIMIT ?"), ("ServiceRequest", 200))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    resultado = []
+    for row in rows:
+        item = row_to_obj(row)
+        nome = str(item.get("name", "")).lower()
+        telefone = "".join(char for char in str(item.get("phone", "")) if char.isdigit())
+        if (numeros and numeros in telefone) or (not numeros and termo in nome):
+            resultado.append({
+                "service_type": item.get("service_type"),
+                "status": item.get("status", "Novo"),
+                "created_date": item.get("created_date"),
+            })
+    return jsonify(resultado)
+
 @app.route("/api/entities/<entidade>/<id>", methods=["PUT"])
+@login_required
 def atualizar(entidade, id):
     dados_novos = request.get_json(force=True) or {}
+    invalid = entidade_valida(entidade)
+    if invalid: return invalid
     conn = get_db()
     cur = conn.cursor()
     cur.execute(q("SELECT * FROM registros WHERE id=? AND entidade=?"), (id, entidade))
@@ -217,7 +276,10 @@ def atualizar(entidade, id):
     return jsonify(atual)
 
 @app.route("/api/entities/<entidade>/<id>", methods=["DELETE"])
+@login_required
 def apagar(entidade, id):
+    invalid = entidade_valida(entidade)
+    if invalid: return invalid
     agora = datetime.datetime.utcnow().isoformat()
     conn = get_db()
     cur = conn.cursor()
@@ -228,6 +290,7 @@ def apagar(entidade, id):
     return jsonify({"ok": True})
 
 @app.route("/api/lixeira", methods=["GET"])
+@login_required
 def listar_lixeira():
     limpar_lixeira_antiga()
     conn = get_db()
@@ -244,6 +307,7 @@ def listar_lixeira():
     return jsonify(resultado)
 
 @app.route("/api/lixeira/<id>/restaurar", methods=["POST"])
+@login_required
 def restaurar(id):
     conn = get_db()
     cur = conn.cursor()
@@ -254,6 +318,7 @@ def restaurar(id):
     return jsonify({"ok": True})
 
 @app.route("/api/lixeira/<id>", methods=["DELETE"])
+@login_required
 def apagar_definitivo(id):
     conn = get_db()
     cur = conn.cursor()
@@ -264,6 +329,7 @@ def apagar_definitivo(id):
     return jsonify({"ok": True})
 
 @app.route("/api/config", methods=["GET"])
+@login_required
 def ver_config():
     conn = get_db()
     cur = conn.cursor()
@@ -285,10 +351,19 @@ def autenticar():
     conn.close()
     cfg = {row_get(r, 'chave'): row_get(r, 'valor') for r in rows}
     ok = dados.get('usuario') == cfg.get('usuario') and dados.get('senha') == cfg.get('senha')
+    if ok:
+        session.clear()
+        session['authenticated'] = True
+        session['user'] = cfg.get('usuario')
     log_event('info', 'auth.success' if ok else 'auth.failure', method='password')
     return jsonify({'ok': ok}), (200 if ok else 401)
 
+@app.route('/api/session', methods=['GET'])
+def verificar_sessao():
+    return jsonify({'authenticated': bool(session.get('authenticated'))})
+
 @app.route("/api/config", methods=["PUT"])
+@login_required
 def salvar_config():
     dados = request.get_json(force=True) or {}
     conn = get_db()
