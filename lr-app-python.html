@@ -2326,6 +2326,24 @@ const loadRelatorioBase=loadRelatorio; loadRelatorio=async function(){await load
 
 const dashboardFixBase=loadDashboard; loadDashboard=async function(){await dashboardFixBase();const cards=document.querySelectorAll('#dash-stats .sc');const ag=(state.orders||[]).filter(o=>statusAtual(o)==='Agendada').length;const pagas=(state.orders||[]).filter(o=>ordemConcluida(o)&&pagamentoConfirmado(o)).length;if(cards[0])cards[0].querySelector('.sc-num').textContent=ag;if(cards[4])cards[4].querySelector('.sc-num').textContent=pagas;};
 
+// Correções finais de filtros, navegação e visibilidade das limpezas.
+sbMap['t-limpezas']='sb-limpezas';
+(function corrigirInteracoesFinais(){
+  const localData=s=>{const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?new Date(+m[1],+m[2]-1,+m[3]):null;};
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  const conclusao=o=>typeof ordemConcluida==='function'&&ordemConcluida(o);
+  const limpeza=o=>o&&(o.is_cleaning_followup===true||o.is_cleaning_followup==='true');
+  const disponivelNaOrdem=o=>{if(!limpeza(o))return true;const d=localData(o.scheduled_date);if(!d)return false;const limite=new Date(d);limite.setMonth(limite.getMonth()-1);return hoje>=limite;};
+  const renderAtual=renderOrdens; renderOrdens=function(list){renderAtual((list||[]).filter(disponivelNaOrdem));};
+  function limparDuplicados(){const bs=[...document.querySelectorAll('#t-ordens .filtro-atraso')];bs.slice(1).forEach(b=>b.remove());}
+  function filtroCorreto(f,btn){limparDuplicados();window.filtroOrdAtual=f;const grupo=document.querySelector('#t-ordens > .fgap');if(grupo){grupo.querySelectorAll(':scope > .btn').forEach(b=>{b.className='btn btn-sm btn-sm-k';if(b.classList.contains('filtro-atraso'))b.style.color='#c87979';});if(btn&&grupo.contains(btn)){btn.className='btn btn-sm btn-sm-b';if(f==='Em Atraso')btn.style.color='#fff';}}document.querySelectorAll('#ord-list .order-card').forEach(c=>{const o=(state.orders||[]).find(x=>x.id===c.dataset.orderId);const atrasado=o&&o.scheduled_date&&!conclusao(o)&&localData(o.scheduled_date)<hoje;const mostrar=f==='todas'||(f==='Em Atraso'?atrasado:c.dataset.status===f);c.style.display=mostrar?'block':'none';});}
+  filtOrd=filtroCorreto;
+  const ordLoadFinal=loadOrdens; loadOrdens=async function(){limparDuplicados();await ordLoadFinal();limparDuplicados();};
+  const dashFinal=loadDashboard; loadDashboard=async function(){await dashFinal();const list=(state.orders||[]).filter(o=>!conclusao(o)&&disponivelNaOrdem(o));const el=document.getElementById('dash-requests');if(el){const ordenadas=list.filter(o=>o.scheduled_date).sort((a,b)=>String(a.scheduled_date).localeCompare(String(b.scheduled_date))).slice(0,3);el.innerHTML=ordenadas.length?ordenadas.map(o=>`<div class="dash-order-link" data-go-order="${o.id}" style="padding:13px 0;border-bottom:1px solid var(--border);cursor:pointer"><div style="font-size:.88rem;font-weight:600;color:var(--text)">${formatName(o.client_name)} — ${o.service_type}</div><div style="font-size:.75rem;color:var(--text2)">${fmtDate(o.scheduled_date)}${o.scheduled_time?' · '+o.scheduled_time:''}</div></div>`).join(''):'<div class="empty">Nenhuma próxima ordem</div>';el.querySelectorAll('[data-go-order]').forEach(x=>x.onclick=()=>{tp('t-ordens');setTimeout(()=>filtroCorreto('Agendada'),50);});}};
+  document.addEventListener('click',e=>{const card=e.target.closest('#t-dash #dash-stats .sc');if(!card)return;const t=card.textContent||'';if(t.includes('Clientes'))tp('t-clientes');else if(t.includes('Lembretes'))tp('t-lembretes');else if(t.includes('Atraso')){tp('t-ordens');setTimeout(()=>filtroCorreto('Em Atraso'),50);}else if(t.includes('Receita'))tp('t-relatorio');});
+  limparDuplicados();
+})();
+
 // init date
 // Atualização por gesto no celular: puxe a tela para baixo no topo da página.
 let pullStartY = 0;
