@@ -2407,7 +2407,7 @@ const renderOrdensAvisosBase=renderOrdens; renderOrdens=function(list){renderOrd
     el.innerHTML=futuras.length?futuras.map(o=>ordemHtml(o)).join(''):'<div class="empty">Nenhuma próxima ordem</div>';
     let box=document.getElementById('dash-overdue');
     if(!box){box=document.createElement('div');box.id='dash-overdue';el.parentNode.insertBefore(box,el.nextSibling);}
-    box.innerHTML=`<div class="sec-lbl dash-overdue-heading">Ordens em atraso <button class="sec-link" onclick="tp('t-ordens');setTimeout(()=>filtroCorreto('Em Atraso'),50)">Ver todas →</button></div><div>${atrasadas.length?atrasadas.map(o=>ordemHtml(o,true)).join(''):'<div class="empty">Nenhuma ordem em atraso</div>'}</div>`;
+    box.innerHTML=`<div class="sec-lbl dash-overdue-heading">Ordens em atraso <button class="sec-link" onclick="tp('t-ordens');setTimeout(()=>filtOrd('Em Atraso'),250)">Ver todas →</button></div><div>${atrasadas.length?atrasadas.map(o=>ordemHtml(o,true)).join(''):'<div class="empty">Nenhuma ordem em atraso</div>'}</div>`;
   };
   const dashboardAnterior=loadDashboard;
   loadDashboard=async function(){await dashboardAnterior();if(state.orders&&state.orders.length)resumo(state.orders);};
@@ -2430,7 +2430,34 @@ const renderOrdensAvisosBase=renderOrdens; renderOrdens=function(list){renderOrd
     .dash-order-overdue .dash-order-marker{background:var(--danger);}
     .dash-order-copy{flex:1;min-width:0}.dash-order-title{font-size:.88rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dash-order-date{font-size:.75rem;color:var(--text2);margin-top:3px}.dash-overdue-heading{margin-top:20px;color:var(--danger)!important}.dash-order-overdue .dash-order-date{color:var(--danger);font-weight:600}.rel-total-geral{border-color:var(--success)!important}
     .badge.bo,.badge.br{background:var(--dangerL)!important;color:var(--danger)!important;border-color:var(--danger)!important}
+    #t-ordens .filtro-atraso{color:var(--danger)!important;font-weight:700;border-color:var(--danger)!important}
+    #t-ordens .filtro-atraso.btn-sm-b{background:var(--danger)!important;color:#fff!important;border-color:var(--danger)!important}
+    #t-ordens .btn-sm-g{background:var(--successL)!important;color:var(--success)!important;border-color:var(--success)!important}
+    #t-ordens .btn-sm-o{background:var(--successL)!important;color:var(--success)!important;border-color:var(--success)!important}
+    #t-ordens .dash-order-marker{background:var(--blue3)}
   `;document.head.appendChild(style);
+})();
+
+// Relatorio final: o mes selecionado controla todos os indicadores e a lista.
+(function corrigirRelatorioPorMes(){
+  const carregar=async function(){
+    try{
+      const orders=await apiGet('ServiceOrder',{limit:1000,sort_by:'-created_date'});state.orders=orders;state.loaded.orders=true;
+      const select=document.getElementById('rel-month'),now=new Date();
+      if(select&&!select.options.length){for(let i=0;i<24;i++){const d=new Date(now.getFullYear(),now.getMonth()-i,1),o=document.createElement('option');o.value=`${d.getFullYear()}-${d.getMonth()}`;o.textContent=d.toLocaleString('pt-BR',{month:'long',year:'numeric'});select.appendChild(o);}}
+      const [ano,mesNum]=(select&&select.value?select.value:`${now.getFullYear()}-${now.getMonth()}`).split('-').map(Number);
+      const doMes=d=>{const x=new Date(d);return !isNaN(x)&&x.getFullYear()===ano&&x.getMonth()===mesNum;};
+      const criadas=orders.filter(o=>doMes(o.created_date));
+      const recebidas=orders.filter(o=>pagamentoConfirmado(o)&&doMes(dataPagamento(o)||o.paid_at||o.created_date));
+      const total=orders.filter(pagamentoConfirmado).reduce((s,o)=>s+Number(o.estimated_value||0),0);
+      document.getElementById('rel-period').textContent=new Date(ano,mesNum,1).toLocaleString('pt-BR',{month:'long',year:'numeric'});
+      document.getElementById('rel-stats').innerHTML=`<div class="sc"><div class="sc-num cb">${criadas.length}</div><div class="sc-lbl">Ordens no mês</div></div><div class="sc"><div class="sc-num cg">${criadas.filter(ordemConcluida).length}</div><div class="sc-lbl">Concluídas</div></div><div class="sc"><div class="sc-num cg">R$${valorBR(recebidas.reduce((s,o)=>s+Number(o.estimated_value||0),0))}</div><div class="sc-lbl">Receita confirmada do mês</div></div><div class="sc rel-total-geral"><div class="sc-num cg">R$${valorBR(total)}</div><div class="sc-lbl">Total recebido</div></div>`;
+      const tipos={};criadas.forEach(o=>{const tipo=o.service_type||'Outros';tipos[tipo]=(tipos[tipo]||0)+1;});
+      const clientes=[...new Set(criadas.map(o=>o.client_name).filter(Boolean))];
+      document.getElementById('rel-body').innerHTML=`<div class="sec-lbl">Serviços por tipo</div>${Object.entries(tipos).map(([tipo,n])=>`<div class="card"><div class="row"><span class="card-t">${tipo}</span><span class="badge bb">${n} ordem${n===1?'':'s'}</span></div></div>`).join('')||'<div class="empty">Nenhuma ordem neste mês</div>'}<div class="sec-lbl">Clientes do mês</div>${clientes.map((nome,i)=>`<div class="crow"><div class="cav">${initials(formatName(nome))}</div><div style="flex:1"><div style="font-size:.88rem;font-weight:600;color:var(--text)">${formatName(nome)}</div><div style="font-size:.73rem;color:var(--text2)">${criadas.filter(o=>o.client_name===nome).length} ordem(ns)</div></div></div>`).join('')}`;
+    }catch(e){toast('Erro ao carregar relatório');}
+  };
+  loadRelatorio=carregar;
 })();
 
 // init date
