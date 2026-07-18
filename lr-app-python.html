@@ -1779,9 +1779,26 @@ async function loadConfig() {
       <div class="field"><label>Novo usuário (deixe em branco pra não mudar)</label><input type="text" class="fi" id="cfg-novo-user" placeholder="${cfg.usuario||''}"></div>
       <div class="field"><label>Nova senha (deixe em branco pra não mudar)</label><input type="password" class="fi" id="cfg-nova-senha" placeholder="••••••••"></div>
       <button class="btn btn-blue btn-w" id="cfg-btn" onclick="salvarConfig()">Salvar alterações</button>
+      <button class="btn btn-w" style="margin-top:8px;background:var(--blueL);color:var(--blue);" onclick="exportarDados()">Exportar backup dos dados</button>
       <div class="sb-sep" style="margin:18px 0;"></div>
       <button class="btn btn-w" style="background:var(--dangerL);color:var(--danger);" onclick="go('pub-home')">Sair do painel</button>`;
   } catch(e) { document.getElementById('cfg-body').innerHTML = '<div class="alert alert-r">Erro ao carregar configurações</div>'; }
+}
+async function exportarDados() {
+  try {
+    const r = await fetch(`${API_BASE}/export`);
+    if (!r.ok) throw new Error('export failed');
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lr-backup-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('Backup exportado');
+  } catch(e) { toast('Nao foi possivel exportar o backup'); }
 }
 async function salvarConfig() {
   const novoUser = document.getElementById('cfg-novo-user').value.trim();
@@ -2320,7 +2337,11 @@ const loadRelatorioBase=loadRelatorio; loadRelatorio=async function(){await load
   const renderBaseLim=renderOrdens; renderOrdens=function(list){renderBaseLim(list); document.querySelectorAll('#ord-list .order-card').forEach(card=>{const o=(list||[]).find(x=>x.id===card.dataset.orderId);if(!o||eLimpeza(o))return;const f=card.querySelector('.fgap');if(!f||f.querySelector('.btn-limpeza'))return;const b=document.createElement('button');b.className='btn btn-sm btn-limpeza';b.textContent='Agendar limpeza';b.style.cssText='background:#5b8f7b;color:#fff;padding:6px 9px;font-size:.7rem;';b.onclick=e=>{e.stopPropagation();agendarLimpeza(o.id);};f.appendChild(b);if(!temValor(o))f.querySelectorAll('.btn-cobrar').forEach(x=>x.remove());});};
 
   const filtBase=filtOrd; filtOrd=function(f,btn){window.filtroOrdAtual=f;if(btn){document.querySelectorAll('#t-ordens .fgap:first-of-type .btn').forEach(b=>b.className='btn btn-sm btn-sm-k');btn.className='btn btn-sm btn-sm-b';}document.querySelectorAll('#ord-list .order-card').forEach(c=>{const o=(state.orders||[]).find(x=>x.id===c.dataset.orderId);let show=f==='todas'||(f==='Em Atraso'?emAtraso(o):c.dataset.status===f);c.style.display=show?'block':'none';});};
-  function adicionarFiltroAtraso(){const box=document.querySelector('#t-ordens .fgap'); if(!box||box.querySelector('.filtro-atraso'))return; const b=document.createElement('button');b.className='btn btn-sm btn-sm-k filtro-atraso';b.textContent='Em Atraso';b.onclick=()=>filtOrd('Em Atraso',b);box.insertBefore(b,box.children[1]||null);}
+  function adicionarFiltroAtraso(){
+    // O filtro principal já existe no HTML. Apenas remove cópias antigas.
+    const filtros=[...document.querySelectorAll('#t-ordens .filtro-atraso')];
+    filtros.slice(1).forEach(filtro=>filtro.remove());
+  }
   const loadOrdBase=loadOrdens; loadOrdens=async function(){await loadOrdBase();adicionarFiltroAtraso();};
 
   // Meta mensal persistida no banco. Mantém localStorage apenas como fallback de leitura.

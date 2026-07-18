@@ -17,6 +17,7 @@ Novidades:
 import os, json, uuid, datetime, logging, sys, time
 from functools import wraps
 from flask import Flask, request, jsonify, g, send_from_directory, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
 app.config.update(
@@ -156,6 +157,7 @@ def limpar_lixeira_antiga():
     limite = (datetime.datetime.utcnow() - datetime.timedelta(days=DIAS_NA_LIXEIRA)).isoformat()
     conn = get_db()
     cur = conn.cursor()
+    # Apenas registros ja enviados para a lixeira e expirados sao removidos.
     cur.execute(q("DELETE FROM registros WHERE excluido_em IS NOT NULL AND excluido_em < ?"), (limite,))
     conn.commit()
     cur.close()
@@ -306,6 +308,30 @@ def listar_lixeira():
         resultado.append(obj)
     return jsonify(resultado)
 
+@app.route("/api/export", methods=["GET"])
+@login_required
+def exportar_dados():
+    """Exporta um snapshot legivel sem alterar o banco."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(q("SELECT * FROM registros ORDER BY criado_em ASC"))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify({
+        "exported_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "records": [
+            {
+                "id": row_get(row, "id"),
+                "entidade": row_get(row, "entidade"),
+                "dados": json.loads(row_get(row, "dados")),
+                "criado_em": row_get(row, "criado_em"),
+                "excluido_em": row_get(row, "excluido_em"),
+            }
+            for row in rows
+        ],
+    })
+
 @app.route("/api/lixeira/<id>/restaurar", methods=["POST"])
 @login_required
 def restaurar(id):
@@ -350,7 +376,20 @@ def autenticar():
     cur.close()
     conn.close()
     cfg = {row_get(r, 'chave'): row_get(r, 'valor') for r in rows}
-    ok = dados.get('usuario') == cfg.get('usuario') and dados.get('senha') == cfg.get('senha')
+    senha_fornecida = str(dados.get('senha') or '')
+    senha_salva = str(cfg.get('senha') or '')
+    if senha_salva.startswith(('pbkdf2:', 'scrypt:')):
+        ok = dados.get('usuario') == cfg.get('usuario') and check_password_hash(senha_salva, senha_fornecida)
+    else:
+        # Migração compatível: mantém o login existente e protege a senha após validá-la.
+        ok = dados.get('usuario') == cfg.get('usuario') and senha_fornecida == senha_salva
+        if ok:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(q("UPDATE config SET valor=? WHERE chave='senha'"), (generate_password_hash(senha_fornecida),))
+            conn.commit()
+            cur.close()
+            conn.close()
     if ok:
         session.clear()
         session['authenticated'] = True
