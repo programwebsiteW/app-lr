@@ -21,7 +21,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
 app.config.update(
-    SECRET_KEY=os.environ.get("SECRET_KEY") or uuid.uuid4().hex,
+    SECRET_KEY=os.environ.get("SECRET_KEY") or "lr-climatizacao-session-key-change-in-production",
+    PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=30),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower() == "true",
@@ -392,6 +393,7 @@ def autenticar():
             conn.close()
     if ok:
         session.clear()
+        session.permanent = True
         session['authenticated'] = True
         session['user'] = cfg.get('usuario')
     log_event('info', 'auth.success' if ok else 'auth.failure', method='password')

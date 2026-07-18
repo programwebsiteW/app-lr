@@ -2382,6 +2382,57 @@ sbMap['t-limpezas']='sb-limpezas';
 // Avisos visuais: ajudam a perceber ordens incompletas sem alterar nenhum dado.
 const renderOrdensAvisosBase=renderOrdens; renderOrdens=function(list){renderOrdensAvisosBase(list);document.querySelectorAll('#ord-list .order-card').forEach(card=>{const o=(state.orders||[]).find(x=>x.id===card.dataset.orderId);if(!o)return;const area=card.querySelector('.fgap');if(!area)return;if((o.estimated_value===null||o.estimated_value===undefined||o.estimated_value==='')&&!card.querySelector('.aviso-sem-valor')){const aviso=document.createElement('div');aviso.className='card-s aviso-sem-valor';aviso.textContent='Valor ainda não informado';aviso.style.cssText='color:var(--text3);font-size:.72rem;width:100%;';area.before(aviso);}if(statusAtual(o)==='Agendada'&&!o.scheduled_date&&!card.querySelector('.aviso-sem-data')){const aviso=document.createElement('div');aviso.className='card-s aviso-sem-data';aviso.textContent='Falta definir data e horário';aviso.style.cssText='color:var(--danger);font-size:.72rem;width:100%;';area.before(aviso);}});};
 
+// ===== Regras finais do painel: proximas ordens, atrasos e totais financeiros =====
+(function instalarResumoFinal(){
+  const dataLocal = value => {
+    const m=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? new Date(Number(m[1]),Number(m[2])-1,Number(m[3])) : null;
+  };
+  const agora = () => new Date();
+  const vencida = o => {
+    if (!o || ordemConcluida(o) || !o.scheduled_date) return false;
+    const d=dataLocal(o.scheduled_date); if(!d)return false;
+    if(o.scheduled_time){const p=String(o.scheduled_time).split(':').map(Number);d.setHours(p[0]||0,p[1]||0,0,0);}
+    else d.setHours(23,59,59,999);
+    return d < agora();
+  };
+  const futura = o => Boolean(o && !ordemConcluida(o) && o.scheduled_date && !vencida(o));
+  const ordemHtml = (o, atrasada=false) => `<div class="dash-order-item ${atrasada?'dash-order-overdue':''}">
+    <div class="dash-order-marker"></div><div class="dash-order-copy"><div class="dash-order-title">${formatName(o.client_name)} — ${o.service_type||'Serviço'}</div>
+    <div class="dash-order-date">${atrasada?'Vencida em ':''}${fmtDate(o.scheduled_date)}${o.scheduled_time?' · '+o.scheduled_time:''}</div></div>${statusBadge(atrasada?'Em Atraso':statusAtual(o))}</div>`;
+  const resumo = orders => {
+    const futuras=orders.filter(futura).sort((a,b)=>String(a.scheduled_date).localeCompare(String(b.scheduled_date))).slice(0,3);
+    const atrasadas=orders.filter(vencida).sort((a,b)=>String(a.scheduled_date).localeCompare(String(b.scheduled_date)));
+    const el=document.getElementById('dash-requests'); if(!el)return;
+    el.innerHTML=futuras.length?futuras.map(o=>ordemHtml(o)).join(''):'<div class="empty">Nenhuma próxima ordem</div>';
+    let box=document.getElementById('dash-overdue');
+    if(!box){box=document.createElement('div');box.id='dash-overdue';el.parentNode.insertBefore(box,el.nextSibling);}
+    box.innerHTML=`<div class="sec-lbl dash-overdue-heading">Ordens em atraso <button class="sec-link" onclick="tp('t-ordens');setTimeout(()=>filtroCorreto('Em Atraso'),50)">Ver todas →</button></div><div>${atrasadas.length?atrasadas.map(o=>ordemHtml(o,true)).join(''):'<div class="empty">Nenhuma ordem em atraso</div>'}</div>`;
+  };
+  const dashboardAnterior=loadDashboard;
+  loadDashboard=async function(){await dashboardAnterior();if(state.orders&&state.orders.length)resumo(state.orders);};
+
+  const dinheiro=o=>Number(o.estimated_value||0);
+  const dataRecebimento=o=>new Date(dataPagamento(o)||o.paid_at||o.created_date);
+  const financeiroAnterior=loadPagamentos;
+  loadPagamentos=async function(){await financeiroAnterior();const orders=state.orders||[],now=new Date();
+    const recebidoMes=orders.filter(o=>pagamentoConfirmado(o)&&dataRecebimento(o).getMonth()===now.getMonth()&&dataRecebimento(o).getFullYear()===now.getFullYear()).reduce((s,o)=>s+dinheiro(o),0);
+    const card=document.querySelector('#fin-stats .sc');if(card){card.querySelector('.sc-num').textContent='R$'+valorBR(recebidoMes);card.querySelector('.sc-lbl').textContent='Total recebido no mês';}
+  };
+
+  const relatorioAnterior=loadRelatorio;
+  loadRelatorio=async function(){await relatorioAnterior();const orders=state.orders||[],total=orders.filter(pagamentoConfirmado).reduce((s,o)=>s+dinheiro(o),0),stats=document.getElementById('rel-stats');
+    if(stats&&!stats.querySelector('.rel-total-geral')){const card=document.createElement('div');card.className='sc rel-total-geral';card.innerHTML=`<div class="sc-num cg">R$${valorBR(total)}</div><div class="sc-lbl">Total recebido</div>`;stats.appendChild(card);}
+  };
+  const style=document.createElement('style');style.textContent=`
+    .dash-order-item{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--border);}
+    .dash-order-marker{width:4px;align-self:stretch;min-height:38px;border-radius:3px;background:var(--orange);flex-shrink:0;}
+    .dash-order-overdue .dash-order-marker{background:var(--danger);}
+    .dash-order-copy{flex:1;min-width:0}.dash-order-title{font-size:.88rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dash-order-date{font-size:.75rem;color:var(--text2);margin-top:3px}.dash-overdue-heading{margin-top:20px;color:var(--danger)!important}.dash-order-overdue .dash-order-date{color:var(--danger);font-weight:600}.rel-total-geral{border-color:var(--success)!important}
+    .badge.bo,.badge.br{background:var(--dangerL)!important;color:var(--danger)!important;border-color:var(--danger)!important}
+  `;document.head.appendChild(style);
+})();
+
 // init date
 // Atualização por gesto no celular: puxe a tela para baixo no topo da página.
 let pullStartY = 0;
